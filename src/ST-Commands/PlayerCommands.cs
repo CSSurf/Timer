@@ -32,43 +32,62 @@ public partial class SurfTimer
 
         // To-do: players[userid].Timer.Reset() -> teleport player
         Player SurfPlayer = playerList[player.UserId ?? 0];
-        if (SurfPlayer.Timer.Stage != 0 && CurrentMap.StageStartZone[SurfPlayer.Timer.Stage] != new Vector(0, 0, 0))
-            Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StageStartZone[SurfPlayer.Timer.Stage], CurrentMap.StageStartZoneAngles[SurfPlayer.Timer.Stage], new Vector(0, 0, 0)));
-        else // Reset back to map start
-            Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StartZone, new QAngle(0, 0, 0), new Vector(0, 0, 0)));
+
+        if (SurfPlayer.Timer.IsBonusMode)
+        {
+            if (SurfPlayer.Timer.Bonus != 0 && CurrentMap.BonusStartZone[SurfPlayer.Timer.Bonus] != new Vector(0, 0, 0))
+                Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.BonusStartZone[SurfPlayer.Timer.Bonus], CurrentMap.BonusStartZoneAngles[SurfPlayer.Timer.Bonus], new Vector(0, 0, 0)));
+            else // Reset back to map start
+                Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StartZone, new QAngle(0, 0, 0), new Vector(0, 0, 0)));
+        }
+
+        else
+        {
+            if (SurfPlayer.Timer.Stage != 0 && CurrentMap.StageStartZone[SurfPlayer.Timer.Stage] != new Vector(0, 0, 0))
+                Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StageStartZone[SurfPlayer.Timer.Stage], CurrentMap.StageStartZoneAngles[SurfPlayer.Timer.Stage], new Vector(0, 0, 0)));
+            else // Reset back to map start
+                Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StartZone, new QAngle(0, 0, 0), new Vector(0, 0, 0)));
+        }
+        
         return;
     }
 
     [ConsoleCommand("css_s", "Teleport to a stage")]
+    [ConsoleCommand("css_stage", "Teleport to a stage")]
     [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
     public void PlayerGoToStage(CCSPlayerController? player, CommandInfo command)
     {
         if (player == null)
             return;
 
-        int stage = Int32.Parse(command.ArgByIndex(1)) - 1;
-        if (stage > CurrentMap.Stages - 1 && CurrentMap.Stages > 0)
-            stage = CurrentMap.Stages - 1;
+        int stage = Int32.Parse(command.ArgByIndex(1));
 
         // Must be 1 argument
-        if (command.ArgCount < 2 || stage < 0)
+        if (command.ArgCount < 2 || stage <= 0)
         {
             #if DEBUG
-            player.PrintToChat($"CS2 Surf DEBUG >> css_s >> Arg#: {command.ArgCount} >> Args: {Int32.Parse(command.ArgByIndex(1))}");
+            player.PrintToChat($"CS2 Surf DEBUG >> css_stage >> Arg#: {command.ArgCount} >> Args: {Int32.Parse(command.ArgByIndex(1))}");
             #endif
 
             player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid arguments. Usage: {ChatColors.Green}!s <stage>");
             return;
         }
+
         else if (CurrentMap.Stages <= 0)
         {
             player.PrintToChat($"{PluginPrefix} {ChatColors.Red}This map has no stages.");
             return;
         }
 
+        else if (stage > CurrentMap.Stages)
+        {
+            player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid stage provided, this map has {ChatColors.Green}{CurrentMap.Stages} stages.");
+            return;
+        }
+
         if (CurrentMap.StageStartZone[stage] != new Vector(0, 0, 0))
         {
-            if (stage == 0)
+            if (stage == 1)
                 Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StartZone, CurrentMap.StartZoneAngles, new Vector(0, 0, 0)));
             else
                 Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.StageStartZone[stage], CurrentMap.StageStartZoneAngles[stage], new Vector(0, 0, 0)));
@@ -82,6 +101,55 @@ public partial class SurfTimer
 
         else
             player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid stage provided. Usage: {ChatColors.Green}!s <stage>");
+    }
+
+    [ConsoleCommand("css_b", "Teleport to a bonus")]
+    [ConsoleCommand("css_bonus", "Teleport to a bonus")]
+    [CommandHelper(whoCanExecute: CommandUsage.CLIENT_ONLY)]
+    public void PlayerGoToBonus(CCSPlayerController? player, CommandInfo command)
+    {
+        if (player == null)
+            return;
+
+        int bonus;
+
+        // Check for argument count
+        if (command.ArgCount < 2)
+        {
+            if (CurrentMap.Bonuses > 0)
+                bonus = 1;
+            else
+            {
+                player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid arguments. Usage: {ChatColors.Green}!bonus <bonus>");
+                return;
+            }
+        }
+
+        else
+            bonus = Int32.Parse(command.ArgByIndex(1));
+
+        if (CurrentMap.Bonuses <= 0)
+        {
+            player.PrintToChat($"{PluginPrefix} {ChatColors.Red}This map has no bonuses.");
+            return;
+        }
+
+        else if (bonus > CurrentMap.Bonuses)
+        {
+            player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid bonus provided, this map has {ChatColors.Green}{CurrentMap.Bonuses} bonuses.");
+            return;
+        }
+
+        if (CurrentMap.BonusStartZone[bonus] != new Vector(0, 0, 0))
+        {
+            playerList[player.UserId ?? 0].Timer.Reset();
+            playerList[player.UserId ?? 0].Timer.IsBonusMode = true;
+
+            Server.NextFrame(() => player.PlayerPawn.Value!.Teleport(CurrentMap.BonusStartZone[bonus], CurrentMap.BonusStartZoneAngles[bonus], new Vector(0, 0, 0)));
+        }
+
+        else
+            player.PrintToChat($"{PluginPrefix} {ChatColors.Red}Invalid bonus provided. Usage: {ChatColors.Green}!bonus <bonus>");
     }
 
     [ConsoleCommand("css_spec", "Moves a player automaticlly into spectator mode")]

@@ -19,8 +19,22 @@ internal class Map
     public bool Ranked {get; set;} = false;
     public int DateAdded {get; set;} = 0;
     public int LastPlayed {get; set;} = 0;
-    public int TotalCompletions {get; set;} = 0;
+    /// <summary>
+    /// Map Completion Count - Refer to as MapCompletions[style]
+    /// </summary>
+    public Dictionary<int, int> MapCompletions {get; set;} = new Dictionary<int, int>(); 
+    /// <summary>
+    /// Bonus Completion Count - Refer to as BonusCompletions[bonus#][style]
+    /// </summary>
+    public Dictionary<int, int>[] BonusCompletions { get; set; } = new Dictionary<int, int>[32];
+    /// <summary>
+    /// Map World Record - Refer to as WR[style]
+    /// </summary>
     public Dictionary<int, PersonalBest> WR { get; set; } = new Dictionary<int, PersonalBest>();
+    /// <summary>
+    /// Bonus World Record - Refer to as BonusWR[bonus#][style]
+    /// </summary>
+    public Dictionary<int, PersonalBest>[] BonusWR { get; set; } = new Dictionary<int, PersonalBest>[32];
     public List<int> ConnectedMapTimes { get; set; } = new List<int>();
     public List<ReplayPlayer> ReplayBots { get; set; } = new List<ReplayPlayer> { new ReplayPlayer() };
 
@@ -40,11 +54,23 @@ internal class Map
     public Vector[] CheckpointStartZone {get;} = Enumerable.Repeat(0, 99).Select(x => new Vector(0,0,0)).ToArray();
 
     // Constructor
+    // To-do: This loops through all the triggers. While that's great and comprehensive, some maps have two triggers with the exact same name, because there are two
+    //        for each side of the course (left and right, for example). We should probably work on automatically catching this. 
+    //        Maybe even introduce a new naming convention?
     internal Map(string Name, TimerDatabase DB)
     {
         // Set map name
         this.Name = Name;
+
+        // Initialize WR variables
         this.WR[0] = new PersonalBest(); // To-do: Implement styles
+        for (int i = 0; i < 32; i++)
+        {
+            this.BonusWR[i] = new Dictionary<int, PersonalBest>();
+            this.BonusWR[i][0] = new PersonalBest(); // To-do: Implement styles
+            this.BonusCompletions[i] = new Dictionary<int, int>();
+        }
+
         // Gathering zones from the map
         IEnumerable<CBaseTrigger> triggers = Utilities.FindAllEntitiesByDesignerName<CBaseTrigger>("trigger_multiple");
         // Gathering info_teleport_destinations from the map
@@ -98,8 +124,8 @@ internal class Map
                         if (teleport.Entity!.Name != null && 
                             (IsInZone(trigger.AbsOrigin!, trigger.Collision.BoundingRadius, teleport.AbsOrigin!) || (Regex.Match(teleport.Entity.Name, "^spawn_s([1-9][0-9]?|tage[1-9][0-9]?)_start$").Success && Int32.Parse(Regex.Match(teleport.Entity.Name, "[0-9][0-9]?").Value) == stage)))
                         {
-                            this.StageStartZone[stage - 1] = new Vector(teleport.AbsOrigin!.X, teleport.AbsOrigin!.Y, teleport.AbsOrigin!.Z);
-                            this.StageStartZoneAngles[stage - 1] = new QAngle(teleport.AbsRotation!.X, teleport.AbsRotation!.Y, teleport.AbsRotation!.Z);
+                            this.StageStartZone[stage] = new Vector(teleport.AbsOrigin!.X, teleport.AbsOrigin!.Y, teleport.AbsOrigin!.Z);
+                            this.StageStartZoneAngles[stage] = new QAngle(teleport.AbsRotation!.X, teleport.AbsRotation!.Y, teleport.AbsRotation!.Z);
                             this.Stages++; // Count stage zones for the map to populate DB
                             foundPlayerSpawn = true;
                             break;
@@ -108,14 +134,15 @@ internal class Map
 
                     if (!foundPlayerSpawn)
                     {
-                        this.StageStartZone[stage - 1] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                        this.StageStartZone[stage] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                        this.Stages++;
                     }
                 }
 
                 // Checkpoint start zones (linear maps)
                 else if (Regex.Match(trigger.Entity.Name, "^map_c(p[1-9][0-9]?|heckpoint[1-9][0-9]?)$").Success) 
                 {
-                    this.CheckpointStartZone[Int32.Parse(Regex.Match(trigger.Entity.Name, "[0-9][0-9]?").Value) - 1] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                    this.CheckpointStartZone[Int32.Parse(Regex.Match(trigger.Entity.Name, "[0-9][0-9]?").Value)] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
                     this.Checkpoints++; // Might be useful to have this in DB entry
                 }
                 
@@ -131,8 +158,8 @@ internal class Map
                         if (teleport.Entity!.Name != null && 
                             (IsInZone(trigger.AbsOrigin!, trigger.Collision.BoundingRadius, teleport.AbsOrigin!) || (Regex.Match(teleport.Entity.Name, "^spawn_b([1-9][0-9]?|onus[1-9][0-9]?)_start$").Success && Int32.Parse(Regex.Match(teleport.Entity.Name, "[0-9][0-9]?").Value) == bonus)))
                         {
-                            this.BonusStartZone[bonus - 1] = new Vector(teleport.AbsOrigin!.X, teleport.AbsOrigin!.Y, teleport.AbsOrigin!.Z);
-                            this.BonusStartZoneAngles[bonus - 1] = new QAngle(teleport.AbsRotation!.X, teleport.AbsRotation!.Y, teleport.AbsRotation!.Z);
+                            this.BonusStartZone[bonus] = new Vector(teleport.AbsOrigin!.X, teleport.AbsOrigin!.Y, teleport.AbsOrigin!.Z);
+                            this.BonusStartZoneAngles[bonus] = new QAngle(teleport.AbsRotation!.X, teleport.AbsRotation!.Y, teleport.AbsRotation!.Z);
                             this.Bonuses++; // Count bonus zones for the map to populate DB
                             foundPlayerSpawn = true;
                             break;
@@ -141,17 +168,20 @@ internal class Map
 
                     if (!foundPlayerSpawn)
                     {
-                        this.BonusStartZone[bonus - 1] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                        this.BonusStartZone[bonus] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                        this.Bonuses++;
                     }
                 }
 
                 else if (Regex.Match(trigger.Entity.Name, "^b([1-9][0-9]?|onus[1-9][0-9]?)_end$").Success) 
                 {
-                    this.BonusEndZone[Int32.Parse(Regex.Match(trigger.Entity.Name, "[0-9][0-9]?").Value) - 1] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
+                    this.BonusEndZone[Int32.Parse(Regex.Match(trigger.Entity.Name, "[0-9][0-9]?").Value)] = new Vector(trigger.AbsOrigin!.X, trigger.AbsOrigin!.Y, trigger.AbsOrigin!.Z);
                 }
             }
         }
-        if (this.Stages > 0) this.Stages++; // You did not count the stages right :(
+
+        if (this.Stages > 0) // Account for stage 1, not counted above
+            this.Stages += 1; 
         Console.WriteLine($"[CS2 Surf] Identifying start zone: {this.StartZone.X},{this.StartZone.Y},{this.StartZone.Z}\nIdentifying end zone: {this.EndZone.X},{this.EndZone.Y},{this.EndZone.Z}");
 
         // Gather map information OR create entry
@@ -190,8 +220,6 @@ internal class Map
                 this.ID = postWriteMapData.GetInt32("id");
                 this.Author = postWriteMapData.GetString("author");
                 this.Tier = postWriteMapData.GetInt32("tier");
-                // this.Stages = -1;    // this should now be populated accordingly when looping through hookzones for the map
-                // this.Bonuses = -1;   // this should now be populated accordingly when looping through hookzones for the map
                 this.Ranked = postWriteMapData.GetBoolean("ranked");
                 this.DateAdded = postWriteMapData.GetInt32("date_added");
                 this.LastPlayed = this.DateAdded; 
@@ -254,14 +282,14 @@ internal class Map
     {
         // Get map world records
         Task<MySqlDataReader> reader = DB.Query($@"
-            SELECT MapTimes.*, Player.name
+            SELECT MapTimes.*, MIN(MapTimes.run_time) AS minimum, Player.name
             FROM MapTimes
             JOIN Player ON MapTimes.player_id = Player.id
             WHERE MapTimes.map_id = {this.ID} AND MapTimes.style = {style}
+            GROUP BY MapTimes.type
             ORDER BY MapTimes.run_time ASC;
         ");
         MySqlDataReader mapWrData = reader.Result;
-        int totalRows = 0;
         
         if (mapWrData.HasRows)
         { 
@@ -270,10 +298,26 @@ internal class Map
             this.ConnectedMapTimes.Clear();
             while (mapWrData.Read())
             {
-                if (totalRows == 0) // We are sorting by `run_time ASC` so the first row is always the fastest run for the map and style combo :)
-                {    
+                if (mapWrData.GetInt32("type") > 0)
+                {
+                    this.BonusWR[mapWrData.GetInt32("type")][style].ID = mapWrData.GetInt32("id"); // WR ID for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].Ticks = mapWrData.GetInt32("run_time"); // Fastest run time (WR) for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].Type = mapWrData.GetInt32("type"); // Bonus type (0 = map, 1+ = bonus index)
+                    this.BonusWR[mapWrData.GetInt32("type")][style].StartVelX = mapWrData.GetFloat("start_vel_x"); // Fastest run start velocity X for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].StartVelY = mapWrData.GetFloat("start_vel_y"); // Fastest run start velocity Y for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].StartVelZ = mapWrData.GetFloat("start_vel_z"); // Fastest run start velocity Z for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].EndVelX = mapWrData.GetFloat("end_vel_x"); // Fastest run end velocity X for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].EndVelY = mapWrData.GetFloat("end_vel_y"); // Fastest run end velocity Y for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].EndVelZ = mapWrData.GetFloat("end_vel_z"); // Fastest run end velocity Z for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].RunDate = mapWrData.GetInt32("run_date"); // Fastest run date for the Map and Style combo
+                    this.BonusWR[mapWrData.GetInt32("type")][style].Name = mapWrData.GetString("name"); // Fastest run player name for the Map and Style combo
+                }
+
+                else 
+                {
                     this.WR[style].ID = mapWrData.GetInt32("id"); // WR ID for the Map and Style combo
                     this.WR[style].Ticks = mapWrData.GetInt32("run_time"); // Fastest run time (WR) for the Map and Style combo
+                    this.WR[style].Type = mapWrData.GetInt32("type"); // Bonus type (0 = map, 1+ = bonus index)
                     this.WR[style].StartVelX = mapWrData.GetFloat("start_vel_x"); // Fastest run start velocity X for the Map and Style combo
                     this.WR[style].StartVelY = mapWrData.GetFloat("start_vel_y"); // Fastest run start velocity Y for the Map and Style combo
                     this.WR[style].StartVelZ = mapWrData.GetFloat("start_vel_z"); // Fastest run start velocity Z for the Map and Style combo
@@ -282,16 +326,43 @@ internal class Map
                     this.WR[style].EndVelZ = mapWrData.GetFloat("end_vel_z"); // Fastest run end velocity Z for the Map and Style combo
                     this.WR[style].RunDate = mapWrData.GetInt32("run_date"); // Fastest run date for the Map and Style combo
                     this.WR[style].Name = mapWrData.GetString("name"); // Fastest run player name for the Map and Style combo
+                
+                    this.ConnectedMapTimes.Add(mapWrData.GetInt32("id"));
                 }
-                this.ConnectedMapTimes.Add(mapWrData.GetInt32("id"));
-                totalRows++;
             }
         }
         mapWrData.Close();
-        this.TotalCompletions = totalRows; // Total completions for the map and style - this should maybe be added to PersonalBest class
+
+        // Count completions
+        Task<MySqlDataReader> completionStats = DB.Query($@"
+            SELECT MapTimes.type, COUNT(*) as count
+            FROM MapTimes 
+            WHERE MapTimes.map_id = {this.ID}
+            GROUP BY type;
+        ");
+        MySqlDataReader completionStatsResult = completionStats.Result;
+
+        if (completionStatsResult.HasRows)
+        {
+            while (completionStatsResult.Read())
+            {
+                if (completionStatsResult.GetInt32("type") > 0)
+                {
+                    // To-do: bonus completion counts
+                    this.BonusCompletions[completionStatsResult.GetInt32("type")][style] = completionStatsResult.GetInt32("count");
+                }
+
+                else
+                {
+                    // Total completions for the map and style - this should maybe be added to PersonalBest class
+                    this.MapCompletions[style] = completionStatsResult.GetInt32("count");
+                }
+            }
+        }
+        completionStatsResult.Close();
 
         // Get map world record checkpoints
-        if (totalRows != 0)
+        if (this.MapCompletions[style] != 0)
         {
             Task<MySqlDataReader> cpReader = DB.Query($"SELECT * FROM `Checkpoints` WHERE `maptime_id` = {this.WR[style].ID};");
             MySqlDataReader cpWrData = cpReader.Result;
@@ -299,20 +370,20 @@ internal class Map
             {
                 #if DEBUG
                 Console.WriteLine($"cp {cpWrData.GetInt32("cp")} ");
-                Console.WriteLine($"run_time {cpWrData.GetFloat("run_time")} ");
+                Console.WriteLine($"run_time {cpWrData.GetInt32("run_time")} ");
                 Console.WriteLine($"sVelX {cpWrData.GetFloat("start_vel_x")} ");
                 Console.WriteLine($"sVelY {cpWrData.GetFloat("start_vel_y")} ");
                 #endif
 
                 Checkpoint cp = new(cpWrData.GetInt32("cp"),
-                                    cpWrData.GetInt32("run_time"),   // To-do: what type of value we use here? DB uses DECIMAL but `.Tick` is int???
+                                    cpWrData.GetInt32("run_time"),
                                     cpWrData.GetFloat("start_vel_x"),
                                     cpWrData.GetFloat("start_vel_y"),
                                     cpWrData.GetFloat("start_vel_z"),
                                     cpWrData.GetFloat("end_vel_x"),
                                     cpWrData.GetFloat("end_vel_y"),
                                     cpWrData.GetFloat("end_vel_z"),
-                                    cpWrData.GetFloat("end_touch"),
+                                    cpWrData.GetInt32("end_touch"),
                                     cpWrData.GetInt32("attempts"));
                 cp.ID = cpWrData.GetInt32("cp");
                 // To-do: cp.ID = calculate Rank # from DB
